@@ -32,6 +32,8 @@ namespace SteamAccountSwitcher
         Steam steam;
 
         string settingsSave;
+        public string masterPass;
+        public bool wrongPass = true;
 
         public MainWindow()
         {
@@ -48,7 +50,7 @@ namespace SteamAccountSwitcher
             }
 
             accountList = new AccountList();
-            
+
             //Get directory of Executable
             settingsSave = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase).TrimStart(@"file:\\".ToCharArray());
 
@@ -56,30 +58,43 @@ namespace SteamAccountSwitcher
 
             try
             {
-                ReadAccountsFromFile();
+                if (masterPass == null)
+                {
+                    MasterPassword mp = new MasterPassword();
+                    if (mp.ShowDialog() == true)
+                    {
+                        masterPass = mp.textBox.Text;
+                        if (ReadAccountsFromFile())
+                        {
+                            listBoxAccounts.ItemsSource = accountList.Accounts;
+                            listBoxAccounts.Items.Refresh();
+
+                            if (accountList.InstallDir == "" || (accountList.InstallDir == null))
+                            {
+                                accountList.InstallDir = SelectSteamFile(@"C:\Program Files (x86)\Steam");
+                                if (accountList.InstallDir == null)
+                                {
+                                    MessageBox.Show("You cannot use SteamAccountSwitcher without selecting your Steam.exe. Program will close now.", "Steam missing", MessageBoxButton.OK, MessageBoxImage.Error);
+                                    Close();
+                                }
+                            }
+
+                            steam = new Steam(accountList.InstallDir);
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("Please define a master password!");
+                        this.Close();
+                    }
+                }
             }
-            catch
+            catch (Exception e)
             {
+                MessageBox.Show(e.Message);
                 //Maybe create file?
             }
 
-            
-
-            listBoxAccounts.ItemsSource = accountList.Accounts;
-            listBoxAccounts.Items.Refresh();
-
-            if (accountList.InstallDir == "" || (accountList.InstallDir == null))
-            {
-                accountList.InstallDir = SelectSteamFile(@"C:\Program Files (x86)\Steam");
-                if(accountList.InstallDir == null)
-                {
-                    MessageBox.Show("You cannot use SteamAccountSwitcher without selecting your Steam.exe. Program will close now.", "Steam missing", MessageBoxButton.OK, MessageBoxImage.Error);
-                    Close();
-                }
-            }
-
-            steam = new Steam(accountList.InstallDir);
-            
         }
 
         private string SelectSteamFile(string initialDirectory)
@@ -114,16 +129,38 @@ namespace SteamAccountSwitcher
 
         public void WriteAccountsToFile()
         {
-            string xmlAccounts = this.ToXML<AccountList>(accountList);
-            StreamWriter file = new System.IO.StreamWriter(settingsSave + "\\accounts.ini");
-            file.Write(Crypto.Encrypt(xmlAccounts));
-            file.Close();
+            try {
+                if (wrongPass == false)
+                {
+                    string xmlAccounts = this.ToXML<AccountList>(accountList);
+                    StreamWriter file = new System.IO.StreamWriter(settingsSave + "\\accounts.ini");
+                    file.Write(Crypto.Encrypt(xmlAccounts, this.masterPass));
+                    file.Close();
+                }
+            }
+            catch
+            {
+
+            }
         }
 
-        public void ReadAccountsFromFile()
+        public bool ReadAccountsFromFile()
         {
-            string text = System.IO.File.ReadAllText(settingsSave + "\\accounts.ini");
-            accountList = FromXML<AccountList>(Crypto.Decrypt(text));
+            if (File.Exists(settingsSave + "\\accounts.ini")) {
+                string text = System.IO.File.ReadAllText(settingsSave + "\\accounts.ini");
+                try {
+                    string convert = Crypto.Decrypt(text, this.masterPass);
+                    accountList = FromXML<AccountList>(convert);
+                    wrongPass = false;
+                    return true;
+                } catch(Exception e)
+                {
+                    MessageBox.Show("Your password is invalid.");
+                    wrongPass = true;
+                    Application.Current.Shutdown();
+                }
+            }
+            return false;
         }
 
         public static T FromXML<T>(string xml)
